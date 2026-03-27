@@ -31,6 +31,7 @@ class OpenSearchLoadSpec(Spec):
     es_host: str = 'localhost'
     es_port: int = 9200
     dataset_config_path: str = 'config/datasets.yaml'
+    empty_index: bool = False
 
 
 class OpenSearchLoad(Task):
@@ -55,6 +56,8 @@ class OpenSearchLoad(Task):
             opensearch = OpenSearch(
                 [{'host': self.spec.es_host, 'port': self.spec.es_port}], use_ssl=False, timeout=7200
             )
+        if self.spec.empty_index:
+            self._empty_index(opensearch)
         json_files = self._get_json_files()
         if not json_files:
             logger.warning(f'no .json files found for dataset {self.spec.dataset}, no data loaded')
@@ -88,6 +91,14 @@ class OpenSearchLoad(Task):
                 logger.info('no document id field specified')
                 for doc in rows:
                     yield doc
+
+    def _empty_index(self, opensearch: OpenSearch) -> None:
+        logger.info(f'emptying index {self._index_name}')
+        opensearch.delete_by_query(
+            index=self._index_name,
+            body={'query': {'match_all': {}}},
+            params={'wait_for_completion': 'true', 'refresh': 'true'},
+        )
 
     def _get_json_files(self) -> list[Path]:
         json_dir = Path(f'{self.context.config.work_path}/{self.spec.json_parent}/{self._output_dir}')

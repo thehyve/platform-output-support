@@ -28,6 +28,7 @@ class ClickhouseLoadSpec(Spec):
     clickhouse_database: str = 'ot'
     clickhouse_port: int = 8123
     data_dir_parent: str
+    drop_table_if_exists: bool = False
     dataset_config_path: str = 'config/datasets.yaml'
 
 
@@ -68,6 +69,8 @@ class ClickhouseLoad(Task):
         if not clickhouse_client:
             raise ClickhouseLoadError(f'Clickhouse service {self.spec.service_name} failed to start')
         # create table tables
+        if self.spec.drop_table_if_exists:
+            self._drop_table(self._table_name, clickhouse_client)
         pre_load_statements = Path(self._pre_load_sql).read_text().split(';')
         self._execute_statements(clickhouse_client, pre_load_statements)
         # load data
@@ -76,6 +79,10 @@ class ClickhouseLoad(Task):
             logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
             insert_file(clickhouse_client, self._table_name, str(file), fmt='Parquet')
         if self._post_load_sql is not None:
+            if self.spec.drop_table_if_exists:
+                # split suffix (_log) from table name
+                table_name = self._table_name.rsplit('_', 1)[0]
+                self._drop_table(table_name, clickhouse_client)
             # run post load sql
             post_load_statements = Path(self._post_load_sql).read_text().split(';')
             self._execute_statements(clickhouse_client, post_load_statements)
@@ -88,3 +95,6 @@ class ClickhouseLoad(Task):
         for sql in statements:
             if sql.strip():
                 client.query(sql)
+
+    def _drop_table(self, table: str, client) -> None:
+        client.query(f'DROP TABLE IF EXISTS {table}')
