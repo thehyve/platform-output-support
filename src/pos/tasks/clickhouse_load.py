@@ -43,6 +43,7 @@ class ClickhouseLoad(Task):
             self._pre_load_sql = self._config[self.spec.dataset].get('preload_script')
             self._post_load_sql = self._config[self.spec.dataset].get('postload_script')
             self._glob_pattern = self._config[self.spec.dataset].get('glob_pattern', '*.parquet')
+            self._format = self._config[self.spec.dataset].get('format', 'Parquet')
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
 
@@ -77,7 +78,7 @@ class ClickhouseLoad(Task):
         files = self._get_parquet_path().glob(self._glob_pattern)
         for file in files:
             logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
-            insert_file(clickhouse_client, self._table_name, str(file), fmt='Parquet')
+            insert_file(clickhouse_client, self._table_name, str(file), fmt=self._format)
         if self._post_load_sql is not None:
             if self.spec.drop_table_if_exists:
                 # split suffix (_log) from table name
