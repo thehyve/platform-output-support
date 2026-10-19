@@ -11,6 +11,19 @@ from otter.util.errors import OtterError
 from pos.services.clickhouse import ClickhouseInstanceManager
 from pos.utils import get_config
 
+# ClickHouse settings that make an empty text field map to the column default
+# (NULL for Nullable columns) instead of raising CANNOT_PARSE_NUMBER/CANNOT_PARSE_TEXT.
+_EMPTY_AS_DEFAULT_SETTINGS = {
+    'TabSeparated': {'input_format_tsv_empty_as_default': 1},
+    'TabSeparatedWithNames': {'input_format_tsv_empty_as_default': 1},
+    'TabSeparatedWithNamesAndTypes': {'input_format_tsv_empty_as_default': 1},
+    'TSV': {'input_format_tsv_empty_as_default': 1},
+    'TSVWithNames': {'input_format_tsv_empty_as_default': 1},
+    'CSV': {'input_format_csv_empty_as_default': 1},
+    'CSVWithNames': {'input_format_csv_empty_as_default': 1},
+    'CSVWithNamesAndTypes': {'input_format_csv_empty_as_default': 1},
+}
+
 
 class ClickhouseLoadError(OtterError):
     """Base class for exceptions in this module."""
@@ -44,6 +57,7 @@ class ClickhouseLoad(Task):
             self._post_load_sql = self._config[self.spec.dataset].get('postload_script')
             self._glob_pattern = self._config[self.spec.dataset].get('glob_pattern', '*.parquet')
             self._format = self._config[self.spec.dataset].get('format', 'Parquet')
+            self._extra_insert_settings = self._config[self.spec.dataset].get('insert_settings', {})
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
 
@@ -78,7 +92,13 @@ class ClickhouseLoad(Task):
         files = self._get_parquet_path().glob(self._glob_pattern)
         for file in files:
             logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
-            insert_file(clickhouse_client, self._table_name, str(file), fmt=self._format)
+            insert_file(
+                clickhouse_client,
+                self._table_name,
+                str(file),
+                fmt=self._format,
+                settings=self._insert_settings(),
+            )
         if self._post_load_sql is not None:
             if self.spec.drop_table_if_exists:
                 # split suffix (_log) from table name
@@ -88,6 +108,11 @@ class ClickhouseLoad(Task):
             post_load_statements = Path(self._post_load_sql).read_text().split(';')
             self._execute_statements(clickhouse_client, post_load_statements)
         return self
+
+    def _insert_settings(self) -> dict:
+        settings = dict(_EMPTY_AS_DEFAULT_SETTINGS.get(self._format, {}))
+        settings.update(self._extra_insert_settings)
+        return settings
 
     def _get_parquet_path(self) -> Path:
         return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')
