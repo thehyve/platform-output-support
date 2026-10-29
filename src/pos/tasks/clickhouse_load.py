@@ -58,6 +58,8 @@ class ClickhouseLoad(Task):
             self._glob_pattern = self._config[self.spec.dataset].get('glob_pattern', '*.parquet')
             self._format = self._config[self.spec.dataset].get('format', 'Parquet')
             self._extra_insert_settings = self._config[self.spec.dataset].get('insert_settings', {})
+            self._drop_before_load = self._config[self.spec.dataset].get('drop_before_load', [])
+            self._drop_after_load = self._config[self.spec.dataset].get('drop_after_load', [])
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
 
@@ -86,6 +88,8 @@ class ClickhouseLoad(Task):
         # create table tables
         if self.spec.drop_table_if_exists:
             self._drop_table(self._table_name, clickhouse_client)
+            for table in self._drop_before_load:
+                self._drop_table(table, clickhouse_client)
         pre_load_statements = Path(self._pre_load_sql).read_text().split(';')
         self._execute_statements(clickhouse_client, pre_load_statements)
         # load data
@@ -107,6 +111,8 @@ class ClickhouseLoad(Task):
             # run post load sql
             post_load_statements = Path(self._post_load_sql).read_text().split(';')
             self._execute_statements(clickhouse_client, post_load_statements)
+        for table in self._drop_after_load:
+            self._drop_table(table, clickhouse_client)
         return self
 
     def _insert_settings(self) -> dict:
